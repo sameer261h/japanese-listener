@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Anime Japanese Listener</title>
+  <style>
+    :root { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#0c0d10; color:#f5f5f5; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:#0c0d10; }
+    main { width:min(980px,92vw); margin:0 auto; padding:28px 0 80px; }
+    h1 { font-size:clamp(28px,5vw,54px); line-height:1; margin:0; letter-spacing:-.04em; }
+    .sub { margin-top:10px; color:#a5a8b0; max-width:700px; }
+    .controls { display:flex; gap:10px; flex-wrap:wrap; margin:24px 0 10px; }
+    button { border:1px solid #2b2d35; background:#17191f; color:#fff; padding:12px 16px; border-radius:12px; font-weight:700; cursor:pointer; }
+    button.primary { background:#f3f4f6; color:#111; border-color:#f3f4f6; }
+    button.danger { background:#2a1518; border-color:#5c282e; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .statusbar { display:flex; align-items:center; gap:10px; color:#b8bbc4; font-size:14px; padding:12px 14px; border:1px solid #23252c; border-radius:12px; background:#111318; margin-bottom:18px; }
+    .dot { width:9px; height:9px; border-radius:50%; background:#666; }
+    .dot.live { background:#36d17c; box-shadow:0 0 0 5px rgba(54,209,124,.12); }
+    #interim { min-height:46px; padding:12px 14px; color:#8e929d; font-size:18px; border-left:2px solid #292c34; margin:14px 0 22px; }
+    #feed { display:flex; flex-direction:column; gap:16px; }
+    .card { border:1px solid #252832; background:#12141a; border-radius:18px; padding:20px; }
+    .jp { font-size:clamp(25px,4vw,40px); font-weight:800; }
+    .romaji { color:#c7c9d0; font-style:italic; margin-top:6px; font-size:18px; }
+    .english { margin-top:16px; font-size:20px; font-weight:700; }
+    .breakdown { margin-top:18px; border-top:1px solid #272a33; padding-top:10px; }
+    .row { display:grid; grid-template-columns:minmax(90px,190px) 1fr; gap:16px; padding:9px 0; border-bottom:1px solid #1f222a; }
+    .term { font-weight:800; font-size:18px; }
+    .meaning { color:#c3c6ce; }
+    .grammar { margin-top:14px; background:#181b22; border-radius:12px; padding:12px 14px; color:#d8dae0; }
+    .meta { display:flex; justify-content:space-between; gap:12px; margin-top:12px; color:#6f7480; font-size:12px; }
+    .error { border-color:#6b252a; background:#241316; color:#ffd4d6; }
+    details { margin-top:16px; color:#aaa; }
+    textarea { width:100%; min-height:74px; resize:vertical; padding:12px; border-radius:12px; border:1px solid #292c34; background:#111318; color:#fff; font:inherit; margin-top:8px; }
+    .testbox { margin-top:18px; padding:16px; border:1px solid #252832; border-radius:16px; }
+    .tiny { color:#747986; font-size:12px; line-height:1.5; margin-top:12px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Anime Japanese Listener</h1>
+  <div class="sub">Put this laptop near the TV. It listens for Japanese, then shows romaji, natural English, and a useful word/grammar breakdown.</div>
+  <div class="controls">
+    <button id="start" class="primary">🎙 Start listening</button>
+    <button id="stop" class="danger" disabled>Stop</button>
+    <button id="clear">Clear</button>
+  </div>
+  <div class="statusbar"><span id="dot" class="dot"></span><span id="status">Not listening</span></div>
+  <div id="interim">Waiting for Japanese audio…</div>
+  <section id="feed"></section>
+  <details>
+    <summary>Test without audio</summary>
+    <div class="testbox">
+      <textarea id="testText">今日は何をしているの？</textarea>
+      <div class="controls"><button id="testBtn">Analyze sentence</button></div>
+    </div>
+  </details>
+  <p class="tiny">Best in desktop Chrome. Keep the laptop reasonably close to the TV and lower background noise.</p>
+</main>
+<script>
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const $ = id => document.getElementById(id);
+const startBtn = $("start"), stopBtn = $("stop"), clearBtn = $("clear"), testBtn = $("testBtn");
+const statusEl = $("status"), dot = $("dot"), interimEl = $("interim"), feed = $("feed");
+let recognition = null, shouldListen = false, processing = 0, recent = [], restartTimer = null;
+function setStatus(text, live=false) { statusEl.textContent = text; dot.classList.toggle("live", live); }
+function esc(s="") { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+function duplicate(text) {
+  const normalized = text.replace(/\s+/g, "").trim(), now = Date.now();
+  recent = recent.filter(x => now - x.t < 20000);
+  if (recent.some(x => x.text === normalized)) return true;
+  recent.push({ text: normalized, t: now });
+  return false;
+}
+async function analyzeJapanese(japanese) {
+  japanese = japanese.trim();
+  if (!japanese || duplicate(japanese)) return;
+  processing++; setStatus(`Listening • analyzing ${processing}`, true);
+  const placeholder = document.createElement("article");
+  placeholder.className = "card";
+  placeholder.innerHTML = `<div class="jp">${esc(japanese)}</div><div class="romaji">Analyzing…</div>`;
+  feed.prepend(placeholder);
+  try {
+    const res = await fetch("/api/analyze", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ japanese }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Analysis failed");
+    const rows = (data.breakdown || []).map(x => `<div class="row"><div class="term">${esc(x.term)}</div><div class="meaning">${esc(x.meaning)}</div></div>`).join("");
+    placeholder.innerHTML = `
+      <div class="jp">${esc(data.japanese || japanese)}</div>
+      <div class="romaji">${esc(data.romaji || "")}</div>
+      <div class="english">${esc(data.english || "")}</div>
+      <div class="breakdown">${rows}</div>
+      ${data.grammar_note ? `<div class="grammar">${esc(data.grammar_note)}</div>` : ""}
+      <div class="meta"><span>Gemini breakdown</span><span>${new Date().toLocaleTimeString()}</span></div>`;
+  } catch (err) {
+    placeholder.classList.add("error");
+    placeholder.innerHTML = `<strong>Couldn’t analyze:</strong> ${esc(japanese)}<br><small>${esc(err.message)}</small>`;
+  } finally {
+    processing--;
+    if (shouldListen) setStatus(processing ? `Listening • analyzing ${processing}` : "Listening for Japanese…", true);
+  }
+}
+function startRecognition() {
+  if (!SpeechRecognition) { setStatus("Speech recognition isn't supported here. Open this in desktop Chrome."); return; }
+  recognition = new SpeechRecognition();
+  recognition.lang = "ja-JP"; recognition.continuous = true; recognition.interimResults = true; recognition.maxAlternatives = 1;
+  recognition.onstart = () => { setStatus("Listening for Japanese…", true); startBtn.disabled = true; stopBtn.disabled = false; };
+  recognition.onresult = event => {
+    let interim = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript.trim();
+      if (event.results[i].isFinal) { if (transcript) analyzeJapanese(transcript); } else { interim += transcript; }
+    }
+    interimEl.textContent = interim || "Listening…";
+  };
+  recognition.onerror = event => {
+    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+      shouldListen = false; setStatus("Microphone permission blocked. Allow microphone access and try again."); startBtn.disabled = false; stopBtn.disabled = true; return;
+    }
+    if (event.error !== "no-speech" && event.error !== "aborted") setStatus(`Speech recognition error: ${event.error}`);
+  };
+  recognition.onend = () => {
+    if (shouldListen) {
+      clearTimeout(restartTimer);
+      restartTimer = setTimeout(() => { try { recognition.start(); } catch (_) {} }, 350);
+    } else {
+      setStatus("Not listening"); startBtn.disabled = false; stopBtn.disabled = true; interimEl.textContent = "Waiting for Japanese audio…";
+    }
+  };
+  try { recognition.start(); } catch (e) { setStatus(e.message); }
+}
+startBtn.onclick = () => { shouldListen = true; startRecognition(); };
+stopBtn.onclick = () => { shouldListen = false; clearTimeout(restartTimer); try { recognition?.stop(); } catch (_) {} };
+clearBtn.onclick = () => { feed.innerHTML = ""; recent = []; };
+testBtn.onclick = async () => { const text = $("testText").value.trim(); if (text) await analyzeJapanese(text); };
+</script>
+</body>
+</html>
