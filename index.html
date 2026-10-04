@@ -41,7 +41,7 @@
 <body>
 <main>
   <h1>Anime Japanese Listener</h1>
-  <div class="sub">Put this laptop near the TV. It listens for Japanese, then shows romaji, natural English, and a useful word/grammar breakdown.</div>
+  <div class="sub">Put this laptop near the TV. It listens for Japanese, then shows spoken Japanese in romaji, natural English, and a phrase-by-phrase breakdown.</div>
   <div class="controls">
     <button id="start" class="primary">🎙 Start listening</button>
     <button id="stop" class="danger" disabled>Stop</button>
@@ -91,23 +91,22 @@ async function analyzeJapanese(japanese) {
   processing++; setStatus(`Listening • analyzing ${processing}`, true);
   const placeholder = document.createElement("article");
   placeholder.className = "card";
-  placeholder.innerHTML = `<div class="jp">${esc(japanese)}</div><div class="romaji">Analyzing…</div>`;
+  placeholder.innerHTML = `<div class="romaji" style="font-size:28px;font-weight:800">Analyzing spoken Japanese…</div>`;
   feed.prepend(placeholder);
   try {
     const res = await fetch("/api/analyze", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ japanese }) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Analysis failed");
-    const rows = (data.breakdown || []).map(x => `<div class="row"><div class="term">${esc(x.term)}</div><div class="meaning">${esc(x.meaning)}</div></div>`).join("");
+    const rows = (data.breakdown || []).map(x => `<div class="row"><div class="term">${esc(x.romaji)}</div><div class="meaning">${esc(x.meaning)}</div></div>`).join("");
     placeholder.innerHTML = `
-      <div class="jp">${esc(data.japanese || japanese)}</div>
-      <div class="romaji">${esc(data.romaji || "")}</div>
+      <div class="jp">${esc(data.romaji || "")}</div>
       <div class="english">${esc(data.english || "")}</div>
       <div class="breakdown">${rows}</div>
       ${data.grammar_note ? `<div class="grammar">${esc(data.grammar_note)}</div>` : ""}
       <div class="meta"><span>Gemini breakdown</span><span>${new Date().toLocaleTimeString()}</span></div>`;
   } catch (err) {
     placeholder.classList.add("error");
-    placeholder.innerHTML = `<strong>Couldn’t analyze:</strong> ${esc(japanese)}<br><small>${esc(err.message)}</small>`;
+    placeholder.innerHTML = `<strong>Couldn’t analyze spoken line.</strong><br><small>${esc(err.message)}</small>`;
   } finally {
     processing--;
     if (shouldListen) setStatus(processing ? `Listening • analyzing ${processing}` : "Listening for Japanese…", true);
