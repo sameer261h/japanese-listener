@@ -64,14 +64,25 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 const $ = id => document.getElementById(id);
 const startBtn = $("start"), stopBtn = $("stop"), clearBtn = $("clear"), testBtn = $("testBtn");
 const statusEl = $("status"), dot = $("dot"), interimEl = $("interim"), feed = $("feed");
-let recognition = null, shouldListen = false, processing = 0, recent = [], restartTimer = null;
+let recognition = null, shouldListen = false, processing = 0, recent = [], restartTimer = null, interimTimer = null, latestInterim = "", lastSubmitted = "", lastSubmittedAt = 0;
 function setStatus(text, live=false) { statusEl.textContent = text; dot.classList.toggle("live", live); }
 function esc(s="") { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
 function duplicate(text) {
   const normalized = text.replace(/\s+/g, "").trim(), now = Date.now();
   recent = recent.filter(x => now - x.t < 20000);
   if (recent.some(x => x.text === normalized)) return true;
+
+  // Avoid re-sending nearly identical interim/final versions within a few seconds.
+  const prev = lastSubmitted.replace(/\s+/g, "").trim();
+  if (prev && now - lastSubmittedAt < 6000) {
+    const shorter = normalized.length <= prev.length ? normalized : prev;
+    const longer = normalized.length > prev.length ? normalized : prev;
+    if (shorter.length >= 4 && longer.startsWith(shorter) && longer.length - shorter.length <= 3) return true;
+  }
+
   recent.push({ text: normalized, t: now });
+  lastSubmitted = text;
+  lastSubmittedAt = now;
   return false;
 }
 async function analyzeJapanese(japanese) {
@@ -111,9 +122,30 @@ function startRecognition() {
     let interim = "";
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const transcript = event.results[i][0].transcript.trim();
-      if (event.results[i].isFinal) { if (transcript) analyzeJapanese(transcript); } else { interim += transcript; }
+
+      if (event.results[i].isFinal) {
+        if (transcript) {
+          clearTimeout(interimTimer);
+          latestInterim = "";
+          analyzeJapanese(transcript);
+        }
+      } else {
+        interim += transcript;
+      }
     }
-    interimEl.textContent = interim || "Listening…";
+
+    latestInterim = interim.trim();
+    interimEl.textContent = latestInterim || "Listening…";
+
+    // Chrome can take a very long time to mark TV/anime audio as "final".
+    // If the interim transcript stops changing briefly, treat it as a line.
+    clearTimeout(interimTimer);
+    if (latestInterim.length >= 2) {
+      interimTimer = setTimeout(() => {
+        const stable = latestInterim.trim();
+        if (stable) analyzeJapanese(stable);
+      }, 850);
+    }
   };
   recognition.onerror = event => {
     if (event.error === "not-allowed" || event.error === "service-not-allowed") {
@@ -124,7 +156,7 @@ function startRecognition() {
   recognition.onend = () => {
     if (shouldListen) {
       clearTimeout(restartTimer);
-      restartTimer = setTimeout(() => { try { recognition.start(); } catch (_) {} }, 350);
+      restartTimer = setTimeout(() => { try { recognition.start(); } catch (_) {} }, 120);
     } else {
       setStatus("Not listening"); startBtn.disabled = false; stopBtn.disabled = true; interimEl.textContent = "Waiting for Japanese audio…";
     }
@@ -132,7 +164,7 @@ function startRecognition() {
   try { recognition.start(); } catch (e) { setStatus(e.message); }
 }
 startBtn.onclick = () => { shouldListen = true; startRecognition(); };
-stopBtn.onclick = () => { shouldListen = false; clearTimeout(restartTimer); try { recognition?.stop(); } catch (_) {} };
+stopBtn.onclick = () => { shouldListen = false; clearTimeout(restartTimer); clearTimeout(interimTimer); latestInterim = ""; try { recognition?.stop(); } catch (_) {} };
 clearBtn.onclick = () => { feed.innerHTML = ""; recent = []; };
 testBtn.onclick = async () => { const text = $("testText").value.trim(); if (text) await analyzeJapanese(text); };
 </script>
