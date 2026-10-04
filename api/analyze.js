@@ -20,13 +20,13 @@ Return:
 - japanese: clean Japanese text. Fix obvious speech-recognition punctuation, but do not invent missing dialogue.
 - romaji: standard readable Hepburn-style romaji.
 - english: natural conversational English translation appropriate to anime dialogue.
-- breakdown: useful chunks, NOT mechanically every character. Each item has:
-  - term: Japanese word/particle/grammar chunk
-  - meaning: short English explanation in context.
+- breakdown: useful SPOKEN-JAPANESE chunks. Each item has:
+  - romaji: the spoken Japanese chunk in Hepburn romaji only (no kana/kanji)
+  - meaning: short English meaning in context.
 - grammar_note: one short note only when there is a useful grammar/nuance point; otherwise empty string.
 
 Important:
-- Treat conjugated expressions as useful chunks where appropriate (e.g. している = "is doing / doing").
+- Treat conjugated expressions as useful spoken chunks where appropriate (e.g. shite iru = "are doing / doing").
 - Explain particles such as は, を, が, に when they matter.
 - Mention casual/masculine/feminine/polite nuance only if clearly relevant.
 - Keep the whole answer compact and beginner-friendly.
@@ -51,8 +51,8 @@ Important:
                 type: "ARRAY",
                 items: {
                   type: "OBJECT",
-                  properties: { term: { type: "STRING" }, meaning: { type: "STRING" } },
-                  required: ["term", "meaning"]
+                  properties: { romaji: { type: "STRING" }, meaning: { type: "STRING" } },
+                  required: ["romaji", "meaning"]
                 }
               },
               grammar_note: { type: "STRING" }
